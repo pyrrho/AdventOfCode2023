@@ -15,8 +15,6 @@ pub fn main() !void {
     var buf_reader = std.io.bufferedReader(file.reader());
     var in_stream = buf_reader.reader();
 
-    var sum: u64 = 0;
-
     var buffers = [3]ArrayList(u8){
         ArrayList(u8).init(allocator),
         ArrayList(u8).init(allocator),
@@ -34,9 +32,17 @@ pub fn main() !void {
     // Populate 'prev_line' with '.'s as a placeholder.
     try buffers[0].appendNTimes('.', line_len);
 
+    // Capture pointers into `buffers` so we can treat them like a ring buffer.
     var prev = &buffers[0];
     var curr = &buffers[1];
     var next = &buffers[2];
+
+    // Allocate an ArrayList to track neighboring numbers; this is a strict
+    // optimization to help reduce the number of allocs across all loops.
+    var numbers = ArrayList([]u8).init(allocator);
+    defer numbers.deinit();
+
+    var sum: u64 = 0;
 
     var should_break = false;
     while (true) {
@@ -50,7 +56,9 @@ pub fn main() !void {
 
         var i: usize = 0;
         while (std.mem.indexOfPos(u8, curr_line, i, "*")) |idx| : (i = idx + 1) {
-            // Build a winidow of slices from the three relevant lines.
+            // Build a winidow of slices from the three relevant lines,
+            // leveraging the assumption that no part number will be mroe than
+            // three digits long.
             // NB. Apparently guarding is unnecessary; the input has zero cases
             //     of a '*' within two characters of the left or right edge of a
             //     line. We'll always be given a full window.
@@ -64,11 +72,6 @@ pub fn main() !void {
             std.debug.print("  window:{s}\n", .{window[0]});
             std.debug.print("         {s} -- gear idx: {}\n", .{ window[1], gear_idx });
             std.debug.print("         {s}\n", .{window[2]});
-
-            // TODO: Would be more efficient to reuse this array list, just dump
-            //       the ranges per loop
-            var numbers = ArrayList([]u8).init(allocator);
-            defer numbers.deinit();
 
             for (window) |row| {
                 var j: usize = 0;
@@ -95,6 +98,7 @@ pub fn main() !void {
             for (numbers.items) |num| {
                 std.debug.print("    num: {s}\n", .{num});
             }
+            std.debug.print("\n", .{});
 
             if (numbers.items.len == 2) {
                 const a = try std.fmt.parseInt(u64, numbers.items[0], 10);
@@ -102,7 +106,7 @@ pub fn main() !void {
                 sum += a * b;
             }
 
-            std.debug.print("\n", .{});
+            numbers.clearRetainingCapacity();
         }
 
         if (should_break) {
