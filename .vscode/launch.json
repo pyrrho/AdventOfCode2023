@@ -8,7 +8,7 @@
             "name": "lldb",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/zig-out/bin/AdventOfCode2023:day7_1",
+            "program": "${workspaceFolder}/zig-out/bin/AdventOfCode2023:day7_2:test",
             "args": [],
             "cwd": "${workspaceFolder}/",
             "preLaunchTask": "build"
