@@ -152,11 +152,17 @@ pub fn binaryGCDSlice(comptime T: type, s: []T) T {
 }
 
 pub fn binaryLCM(comptime T: type, a: T, b: T) T {
-    std.debug.assert(@typeInfo(T) == .Int);
+    std.debug.assert(@typeInfo(T) == .Int or @typeInfo(T) == .ComptimeInt);
+    const signed = comptime switch (@typeInfo(T)) {
+        .Int => |t| t.signedness == .signed,
+        .ComptimeInt => a < 0 or b < 0,
+        else => false,
+    };
 
     if (a == 0 and b == 0) return 0;
-    const _a = @abs(a);
-    const _b = @abs(b);
+
+    const _a = comptime if (signed) @abs(a) else a;
+    const _b = comptime if (signed) @abs(b) else b;
 
     return _a * @divExact(_b, binaryGCD(T, _a, _b));
 }
