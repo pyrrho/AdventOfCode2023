@@ -172,9 +172,6 @@ pub fn main() !void {
 
         var tokens = std.mem.tokenizeSequence(u8, buf.items, " ");
 
-        // const cards = try allocator.alloc(u8, 5);
-        // const t = tokens.next().?;
-        // std.mem.copyForwards(u8, cards, t);
         const cards = try std.mem.Allocator.dupe(allocator, u8, tokens.next().?[0..5]);
         const bid = try std.fmt.parseInt(u64, tokens.next().?, 10);
 
