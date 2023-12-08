@@ -12,10 +12,6 @@ const Node = struct {
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
 
-    const file = try std.fs.cwd().openFile("src/day8_input.txt", .{});
-    var buf_reader = std.io.bufferedReader(file.reader());
-    const in_stream = buf_reader.reader();
-
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer {
@@ -23,6 +19,9 @@ pub fn main() !void {
         if (deinit_status == .leak) @panic("MEMORY LEAK");
     }
 
+    const file = try std.fs.cwd().openFile("src/day8_input.txt", .{});
+    var buf_reader = std.io.bufferedReader(file.reader());
+    const in_stream = buf_reader.reader();
     var buf = ArrayList(u8).init(allocator);
     defer buf.deinit();
 
@@ -102,38 +101,8 @@ pub fn main() !void {
         try path_steps.append(steps);
     }
 
-    // const lcm = try simpleLCM(path_steps.items, allocator);
     const lcm = binaryLCMSlice(u64, path_steps.items);
     try stdout.print("steps: {}\n", .{lcm});
-}
-
-pub fn simpleLCM(numbers: []u64, allocator: std.mem.Allocator) !u64 {
-    const _numbers = try allocator.alloc(u64, numbers.len);
-    defer allocator.free(_numbers);
-
-    std.mem.copyForwards(u64, _numbers, numbers);
-
-    while (true) {
-        var min = _numbers[0];
-        var min_idx: usize = 0;
-        var all_eq = true;
-
-        for (_numbers, 0..) |n, i| {
-            if (n < min) {
-                min = n;
-                min_idx = i;
-            }
-            if (all_eq and n != min) {
-                all_eq = false;
-            }
-        }
-
-        if (all_eq) break;
-
-        _numbers[min_idx] += numbers[min_idx];
-    }
-
-    return _numbers[0];
 }
 
 pub fn binaryGCD(comptime T: type, a: T, b: T) T {
@@ -186,10 +155,10 @@ pub fn binaryLCM(comptime T: type, a: T, b: T) T {
     std.debug.assert(@typeInfo(T) == .Int);
 
     if (a == 0 and b == 0) return 0;
+    const _a = @abs(a);
+    const _b = @abs(b);
 
-    const ab = a * b;
-    const gcd = binaryGCD(T, a, b);
-    return @divExact(ab, gcd);
+    return _a * @divExact(_b, binaryGCD(T, _a, _b));
 }
 
 pub fn binaryLCMSlice(comptime T: type, s: []T) T {
