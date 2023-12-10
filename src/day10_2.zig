@@ -110,7 +110,7 @@ pub fn main() !void {
         std.debug.print("\n", .{});
     };
 
-    // Replate the 'S' in the map with the starting pipe.
+    // Replace the 'S' in the map with the starting pipe.
     const starting_pipe: u8 = identifyStartingPipe(valid_moves);
     map.lines.items[s.row].items[s.col] = starting_pipe;
 
@@ -122,43 +122,14 @@ pub fn main() !void {
         std.debug.print("\n", .{});
     };
 
-    // Build a directional flood search frontier, seeding the frontier/seen sets
-    // with all edges of the map.
-
+    // Construct a frontier of locations to flood from, and a map of locations
+    // that have already been visited.
     var frontier = ArrayList(FloodStep).init(allocator);
     var seen = AutoHashMap(Location, void).init(allocator);
     defer frontier.deinit();
     defer seen.deinit();
 
-    // // Diagonal motion isn't a thing, so add the four corners of the map to the
-    // // seen set.
-    // try seen.put(.{ .map = &map, .row = 0, .col = 0 }, void{});
-    // try seen.put(.{ .map = &map, .row = 0, .col = map.col_len - 1 }, void{});
-    // try seen.put(.{ .map = &map, .row = map.row_len - 1, .col = map.col_len - 1 }, void{});
-    // try seen.put(.{ .map = &map, .row = map.row_len - 1, .col = 0 }, void{});
-
-    // // Add the rest of each edge to both the frontier and seen sets.
-    // for (1..map.col_len - 1) |i| {
-    //     const l = .{ .map = &map, .row = 0, .col = i };
-    //     try frontier.append(.{ .loc = l, .dir = .south });
-    //     try seen.put(l, void{});
-    // }
-    // for (1..map.col_len - 1) |i| {
-    //     const l = .{ .map = &map, .row = map.row_len - 1, .col = i };
-    //     try frontier.append(.{ .loc = l, .dir = .north });
-    //     try seen.put(l, void{});
-    // }
-    // for (1..map.row_len - 1) |i| {
-    //     const l = .{ .map = &map, .row = i, .col = 0 };
-    //     try frontier.append(.{ .loc = l, .dir = .east });
-    //     try seen.put(l, void{});
-    // }
-    // for (1..map.row_len - 1) |i| {
-    //     const l = .{ .map = &map, .row = i, .col = map.col_len - 1 };
-    //     try frontier.append(.{ .loc = l, .dir = .west });
-    //     try seen.put(l, void{});
-    // }
-
+    // Seed with an arbitrary location on the map.
     tryFlooding(&frontier, &seen, Location{ .map = &map, .row = 0, .col = 1 }, .south);
 
     while (frontier.popOrNull()) |flood_step| {
@@ -174,14 +145,7 @@ pub fn main() !void {
 
         switch (flood_step.loc.element()) {
             '|' => switch (flood_step.dir) {
-                .north => {
-                    {
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.north), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.east), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.south), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.west), ._);
-                    }
-                },
+                .north => @panic("Irreconsilable state"),
                 .east => {
                     {
                         tryFlooding(&frontier, &seen, flood_step.loc.move(.north), .east);
@@ -190,14 +154,7 @@ pub fn main() !void {
                         tryFlooding(&frontier, &seen, flood_step.loc.move(.west), .west);
                     }
                 },
-                .south => {
-                    {
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.north), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.east), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.south), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.west), ._);
-                    }
-                },
+                .south => @panic("Irreconsilable state"),
                 .west => {
                     {
                         tryFlooding(&frontier, &seen, flood_step.loc.move(.north), .west);
@@ -216,14 +173,7 @@ pub fn main() !void {
                         tryFlooding(&frontier, &seen, flood_step.loc.move(.west), .north);
                     }
                 },
-                .east => {
-                    {
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.north), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.east), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.south), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.west), ._);
-                    }
-                },
+                .east => @panic("Irreconsilable state"),
                 .south => {
                     {
                         tryFlooding(&frontier, &seen, flood_step.loc.move(.north), .north);
@@ -232,14 +182,7 @@ pub fn main() !void {
                         tryFlooding(&frontier, &seen, flood_step.loc.move(.west), .south);
                     }
                 },
-                .west => {
-                    {
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.north), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.east), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.south), ._);
-                        // tryFlooding(&frontier, &seen, flood_step.loc.move(.west), ._);
-                    }
-                },
+                .west => @panic("Irreconsilable state"),
             },
             'L' => switch (flood_step.dir) {
                 .north => {
@@ -262,7 +205,6 @@ pub fn main() !void {
                     {
                         tryFlooding(&frontier, &seen, flood_step.loc.move(.north), .west);
                         tryFlooding(&frontier, &seen, flood_step.loc.move(.east), .south);
-                        // can't move south or west
                         // tryFlooding(&frontier, &seen, flood_step.loc.move(.south), ._);
                         // tryFlooding(&frontier, &seen, flood_step.loc.move(.west), ._);
                     }
@@ -271,7 +213,6 @@ pub fn main() !void {
                     {
                         tryFlooding(&frontier, &seen, flood_step.loc.move(.north), .west);
                         tryFlooding(&frontier, &seen, flood_step.loc.move(.east), .south);
-                        // can't move south or west
                         // tryFlooding(&frontier, &seen, flood_step.loc.move(.south), ._);
                         // tryFlooding(&frontier, &seen, flood_step.loc.move(.west), ._);
                     }
@@ -383,10 +324,14 @@ pub fn main() !void {
         }
     }
 
-    const map_size = map.row_len * map.col_len;
-
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("enclosed elements: {}\n", .{map_size - seen.count()});
+
+    // If our flood didn't reach an element of the map, it's because the pipe
+    // loop fully enclosed it.
+    const map_size = map.row_len * map.col_len;
+    const seen_elements = seen.count();
+    const enclosed_elements = map_size - seen_elements;
+    try stdout.print("enclosed elements: {}\n", .{enclosed_elements});
 }
 
 fn debugMap(
