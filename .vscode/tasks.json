@@ -6,7 +6,11 @@
         {
             "label": "build",
             "type": "shell",
-            "command": "zig build",
+            "command": "zig",
+            "args": [
+                "build",
+                "-Doptimize=Debug"
+            ],
             "options": {
                 "cwd": "${workspaceFolder}"
             },
