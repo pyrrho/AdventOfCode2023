@@ -1,6 +1,5 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
-const InputMemo = std.HashMap(Input, u64, InputContext, std.hash_map.default_max_load_percentage);
 
 const Input = struct {
     line: []const u8,
@@ -8,11 +7,18 @@ const Input = struct {
     runs: []const u8,
 };
 
-// Lifting from hash_map.zig. Fun stuff?
+// Hash context for Input.
 pub const InputContext = struct {
     pub fn hash(self: @This(), s: Input) u64 {
         _ = self;
-        return std.hash.Wyhash.hash(0, std.mem.asBytes(&s));
+        // FIXME: This is so wrong. The u64 keyspace is pretty large, so there's
+        //        a reasonable chance we won't see any colisions, but there's a
+        //        _lot_ of lost entorpy in these wrapping additions. This really
+        //        should instantiate a `std.hash.Wyhash`, and `.update` each
+        //        field into the stateful hasher.
+        return std.hash.Wyhash.hash(0, s.line) +%
+            std.hash.Wyhash.hash(0, s.runs) +%
+            std.hash.Wyhash.hash(0, std.mem.asBytes(&s.current_run));
     }
     pub fn eql(self: @This(), a: Input, b: Input) bool {
         _ = self;
@@ -21,6 +27,7 @@ pub const InputContext = struct {
             std.mem.eql(u8, a.runs, b.runs);
     }
 };
+const InputMemo = std.HashMap(Input, u64, InputContext, std.hash_map.default_max_load_percentage);
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -34,7 +41,6 @@ pub fn main() !void {
     var buf_reader = std.io.bufferedReader(file.reader());
     const in_stream = buf_reader.reader();
 
-    // Capture all lines into an Array List
     var input = ArrayList(Input).init(allocator);
     defer {
         for (input.items) |e| {
@@ -82,34 +88,13 @@ pub fn main() !void {
     }
 
     var memo = InputMemo.init(allocator);
-    var gc = ArrayList([]const u8).init(allocator);
-    defer {
-        memo.deinit();
-        for (gc.items) |e| {
-            allocator.free(e);
-        }
-        gc.deinit();
-    }
+    defer memo.deinit();
 
     const stdout = std.io.getStdOut().writer();
 
     var arrangements: u64 = 0;
     for (input.items) |e| {
-        const a = try getArrangements(e, &memo, &gc, allocator);
-
-        for (gc.items) |g| {
-            allocator.free(g);
-        }
-        gc.clearAndFree();
-
-        try stdout.print("'{s}' (", .{e.line});
-        try stdout.print("{}", .{e.runs[0]});
-        for (e.runs[1..]) |run| {
-            try stdout.print(", {}", .{run});
-        }
-        try stdout.print("): {}\n", .{a});
-
-        arrangements += a;
+        arrangements += try getArrangements(e, &memo);
     }
 
     try stdout.print("Arrangements: {}\n", .{arrangements});
@@ -118,8 +103,6 @@ pub fn main() !void {
 fn getArrangements(
     input: Input,
     memo: *InputMemo,
-    gc: *ArrayList([]const u8),
-    allocator: std.mem.Allocator,
 ) !u64 {
     if (memo.get(input)) |arrangements| {
         return arrangements;
@@ -212,8 +195,6 @@ fn getArrangements(
                         .runs = input.runs[r_i..],
                     },
                     memo,
-                    gc,
-                    allocator,
                 );
 
                 // ... or insert a single '#'s.
@@ -224,8 +205,6 @@ fn getArrangements(
                         .runs = input.runs[r_i + 1 ..],
                     },
                     memo,
-                    gc,
-                    allocator,
                 );
 
                 // Aggregate and return
@@ -237,121 +216,3 @@ fn getArrangements(
         }
     }
 }
-
-// fn getArrangements2(
-//     input: Input,
-//     memo: *InputMemo,
-//     gc: *ArrayList([]const u8),
-//     allocator: std.mem.Allocator,
-// ) !u64 {
-//     if (memo.get(input)) |arrangements| {
-//         return arrangements;
-//     }
-
-//     const next_char = input.line[0];
-//     switch (next_char) {
-//         '.' => {
-//             const run_length = std.mem.indexOfAny(u8, input.line, "?#") orelse return 1;
-//             const arrangements = try getArrangements(
-//                 Input{
-//                     .line = input.line[run_length..],
-//                     .nums = input.nums,
-//                 },
-//                 memo,
-//                 gc,
-//                 allocator,
-//             );
-//             try memo.put(input, arrangements);
-//             return arrangements;
-//         },
-//         '#' => {
-//             const run_length = std.mem.indexOfAny(u8, input.line, ".?") orelse return 1;
-//             if (input.nums[0] - run_length == 0) {
-//                 const arrangements = try getArrangements(
-//                     Input{
-//                         .line = input.line[run_length..],
-//                         .nums = input.nums[1..],
-//                     },
-//                     memo,
-//                     gc,
-//                     allocator,
-//                 );
-//                 try memo.put(input, arrangements);
-//                 return arrangements;
-//             }
-
-//             var nums = try std.mem.Allocator.dupe(allocator, u8, input.nums);
-//             nums[0] -= @as(u8, @intCast(run_length));
-//             try gc.append(nums);
-
-//             const arrangements = try getArrangements(
-//                 Input{
-//                     .line = input.line[run_length..],
-//                     .nums = nums,
-//                 },
-//                 memo,
-//                 gc,
-//                 allocator,
-//             );
-//             try memo.put(input, arrangements);
-//             return arrangements;
-//         },
-//         '?' => {
-//             const run_length = std.mem.indexOfAny(u8, input.line, ".#") orelse return 1;
-
-//             if (run_length < input.nums[0]) {
-//                 var nums = try std.mem.Allocator.dupe(allocator, u8, input.nums);
-//                 nums[0] -= @as(u8, @intCast(run_length));
-//                 try gc.append(nums);
-
-//                 const arrangements = try getArrangements(
-//                     Input{
-//                         .line = input.line[run_length..],
-//                         .nums = nums,
-//                     },
-//                     memo,
-//                     gc,
-//                     allocator,
-//                 );
-//                 try memo.put(input, arrangements);
-//                 return arrangements;
-//             }
-
-//             if (run_length == input.nums[0]) {
-//                 const arrangements = try getArrangements(
-//                     Input{
-//                         .line = input.line[run_length..],
-//                         .nums = input.nums[1..],
-//                     },
-//                     memo,
-//                     gc,
-//                     allocator,
-//                 );
-//                 try memo.put(input, arrangements);
-//                 return arrangements;
-//             }
-
-//             const l = try getArrangements(
-//                 Input{
-//                     .line = input.line[input.nums[0]..],
-//                     .nums = input.nums[1..],
-//                 },
-//                 memo,
-//                 gc,
-//                 allocator,
-//             );
-//             const r = try getArrangements(
-//                 Input{
-//                     .line = input.line[1..],
-//                     .nums = input.nums,
-//                 },
-//                 memo,
-//                 gc,
-//                 allocator,
-//             );
-//             try memo.put(input, l + r);
-//             return l + r;
-//         },
-//         else => @panic("ruh roh"),
-//     }
-// }
