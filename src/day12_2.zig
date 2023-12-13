@@ -110,11 +110,13 @@ fn getArrangements(
 
     var i: usize = 0;
     var r_i: usize = 0;
-    var run: u8 = input.current_run;
+    var current_run: u8 = input.current_run;
     while (true) {
         const at_last_run = r_i == input.runs.len;
-        const last_run_done = at_last_run and run == 0;
+        const last_run_done = at_last_run and current_run == 0;
 
+        // If we're at the end of the line, and have no more runs to fill, we've
+        // found a valid arrangement. Otherwise, we've found an invalid one.
         if (i == input.line.len) {
             return if (last_run_done) 1 else 0;
         }
@@ -123,7 +125,9 @@ fn getArrangements(
 
         switch (c) {
             '.' => {
-                if (run != 0) {
+                // If we aren't at the end of a run, seeing a '.' means this is
+                // an invalid arrangement.
+                if (current_run != 0) {
                     return 0;
                 }
 
@@ -133,23 +137,30 @@ fn getArrangements(
                 continue;
             },
             '#' => {
-                if (run == 0) {
+                // If we're at the end of the previous run, it's time to start
+                // the next one.
+                if (current_run == 0) {
+                    // If there isn't a next one, this is an invalid arrangement.
                     if (r_i == input.runs.len) {
                         return 0;
                     }
-                    run = input.runs[r_i];
+                    current_run = input.runs[r_i];
                     r_i += 1;
                 }
 
                 const run_len = (std.mem.indexOfAnyPos(u8, input.line, i, ".?") orelse input.line.len) - i;
-                if (run_len > run) {
+                // If the number of sequential '#'s is larger than the run we're
+                // in, it's and invalid arrangement.
+                if (run_len > current_run) {
                     return 0;
                 }
 
-                run -= @as(u8, @intCast(run_len));
+                current_run -= @as(u8, @intCast(run_len));
                 i += run_len;
 
-                if (run == 0 and i < input.line.len and input.line[i] == '?') {
+                // If we just finished a run, and the next char is a '?', it
+                // must be a '.'. So skip it.
+                if (current_run == 0 and i < input.line.len and input.line[i] == '?') {
                     i += 1;
                 }
 
@@ -159,17 +170,20 @@ fn getArrangements(
                 const run_len = (std.mem.indexOfAnyPos(u8, input.line, i, ".#") orelse input.line.len) - i;
 
                 // If we're in the middle of a run, we have no choice but to continue it.
-                if (run != 0) {
-                    const steps = @min(run, run_len);
-                    run -= steps;
+                if (current_run != 0) {
+                    const steps = @min(current_run, run_len);
+                    current_run -= steps;
                     i += steps;
 
-                    // If this finishes the run, either the next char is
-                    // - Past the end of `input.line`; the sequence is finished.
-                    // - A '.', which is a valid sequenece; continue as normal.
-                    // - A '#', which is an invalid sequence; terminate with 0 arrangements.
-                    // - A '?' that needs to be converted into a '.'; skip the next char and continue.
-                    if (run == 0 and i < input.line.len) {
+                    // If this finishes the run, either the next char is:
+                    // - Past the end of `input.line`, which means the sequence
+                    //   is finished. We can continue as normal and terminate at
+                    //   the top of the loop.
+                    // - A '.', which is a valid sequenece.
+                    // - A '#', which is an invalid sequence.
+                    // - A '?' that needs to be converted into a '.'. So we skip
+                    //   over it, and continue.
+                    if (current_run == 0 and i < input.line.len) {
                         const next_char = input.line[i];
                         if (next_char == '#') {
                             return 0;
@@ -187,7 +201,8 @@ fn getArrangements(
                     continue;
                 }
 
-                // Otherwise, we can either insert a single '.' ...
+                // Otherwise, we can either insert a single '.', skipping over
+                // the next char, and coninuing ...
                 const inserting_dot = try getArrangements(
                     Input{
                         .line = input.line[i + 1 ..],
@@ -197,8 +212,10 @@ fn getArrangements(
                     memo,
                 );
 
-                // ... or insert a single '#'s.
-                const inserting_q = try getArrangements(
+                // ... or by choosing to read the next '?' as a '#' by starting
+                // the next run, and re-entering the loop to ensure we count the
+                // pending '?' as a '#'.
+                const inserting_hash = try getArrangements(
                     Input{
                         .line = input.line[i..],
                         .current_run = input.runs[r_i],
@@ -207,8 +224,8 @@ fn getArrangements(
                     memo,
                 );
 
-                // Aggregate and return
-                const arrangements = inserting_dot + inserting_q;
+                // Aggregate and return.
+                const arrangements = inserting_dot + inserting_hash;
                 try memo.put(input, arrangements);
                 return arrangements;
             },
