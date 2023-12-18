@@ -86,9 +86,9 @@ pub fn main() !void {
         try points.append(Point{ .x = x, .y = y });
         for (plan) |s| {
             switch (s.direction) {
-                .West => x += s.steps,
+                .East => x += s.steps,
                 .South => y += s.steps,
-                .East => x -= s.steps,
+                .West => x -= s.steps,
                 .North => y -= s.steps,
             }
 
@@ -132,8 +132,8 @@ pub fn main() !void {
 
         for (plan) |s| {
             switch (s.direction) {
-                .West => {
-                    grid[y][x] = FillType.fromDirections(prev_dir, .West);
+                .East => {
+                    grid[y][x] = FillType.fromDirections(prev_dir, .East);
                     for (1..s.steps) |_| {
                         x += 1;
                         grid[y][x] = FillType.dug;
@@ -148,8 +148,8 @@ pub fn main() !void {
                     }
                     y += 1;
                 },
-                .East => {
-                    grid[y][x] = FillType.fromDirections(prev_dir, .East);
+                .West => {
+                    grid[y][x] = FillType.fromDirections(prev_dir, .West);
                     for (1..s.steps) |_| {
                         x -= 1;
                         grid[y][x] = FillType.dug;
@@ -198,23 +198,23 @@ pub fn main() !void {
                         in_pit = !in_pit;
                     }
                 },
-                .SouthWest => {
-                    last = .SouthWest;
-                },
                 .SouthEast => {
-                    if (last == .NorthWest) {
-                        in_pit = !in_pit;
-                        last = .level;
-                    }
+                    last = .SouthEast;
                 },
                 .NorthEast => {
-                    if (last == .SouthWest) {
+                    last = .NorthEast;
+                },
+                .SouthWest => {
+                    if (last == .NorthEast) {
                         in_pit = !in_pit;
                         last = .level;
                     }
                 },
                 .NorthWest => {
-                    last = .NorthWest;
+                    if (last == .SouthEast) {
+                        in_pit = !in_pit;
+                        last = .level;
+                    }
                 },
             }
 
@@ -249,16 +249,16 @@ pub fn main() !void {
 // =============================================================================
 
 const Direction = enum(usize) {
-    West,
-    South,
     East,
+    South,
+    West,
     North,
 
     pub fn fromChar(c: u8) !Direction {
         switch (c) {
-            'R' => return .West,
+            'R' => return .East,
             'D' => return .South,
-            'L' => return .East,
+            'L' => return .West,
             'U' => return .North,
             else => @panic("Invalid direction character"),
         }
@@ -279,19 +279,19 @@ const Point = struct {
 const FillType = enum(u4) {
     level = 0,
     dug = 1,
-    SouthWest = 2,
-    SouthEast = 3,
-    NorthEast = 4,
-    NorthWest = 5,
+    SouthEast = 2,
+    SouthWest = 3,
+    NorthWest = 4,
+    NorthEast = 5,
 
     pub fn toChar(self: FillType) u8 {
         switch (self) {
             .level => return '.',
             .dug => return '#',
-            .SouthWest => return 'F',
-            .SouthEast => return '7',
-            .NorthEast => return 'J',
-            .NorthWest => return 'L',
+            .SouthEast => return 'F',
+            .SouthWest => return '7',
+            .NorthWest => return 'J',
+            .NorthEast => return 'L',
         }
     }
 
