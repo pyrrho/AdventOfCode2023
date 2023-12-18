@@ -74,9 +74,8 @@ pub fn main() !void {
     defer path_map.deinit();
     for (path) |n| {
         try path_map.put(n[0], n[1]);
-        heat_loss += grid.weightOf(n[0]);
+        heat_loss += grid.lines[n[0].y][n[0].x];
     }
-    heat_loss -= grid.weightOf(start);
 
     for (grid.lines, 0..) |row, y| {
         for (row, 0..) |_, x| {
@@ -110,11 +109,14 @@ pub fn main() !void {
 // ------------
 
 const DirectionalNode = struct { node: Node, dir: Direction };
-const ReversePath = struct { Node, ?Direction };
+const ReversePath = struct { Node, Direction };
 
-const ParentOf = AutoHashMap(Node, DirectionalNode);
+const ParentOf = AutoHashMap(TravelingNode, TravelingNode);
 
-const ScoreMap = AutoHashMap(Node, u64);
+const ScoreMap = AutoHashMap(TravelingNode, u64);
+
+// Structs
+// -------
 
 const Direction = enum(usize) {
     North,
@@ -128,6 +130,20 @@ const Node = struct {
     y: usize,
 
     pub fn eql(self: Node, other: Node) bool {
+        return self.x == other.x and self.y == other.y;
+    }
+};
+
+const TravelingNode = struct {
+    x: usize,
+    y: usize,
+    dir: Direction,
+    steps: u8,
+
+    pub fn eql(self: TravelingNode, other: TravelingNode) bool {
+        return self.x == other.x and self.y == other.y and self.dir == other.dir and self.steps == other.steps;
+    }
+    pub fn atPositionOf(self: TravelingNode, other: Node) bool {
         return self.x == other.x and self.y == other.y;
     }
 };
@@ -157,7 +173,7 @@ const Grid = struct {
     // TODO: This might be where we limit the forward steps. If we can track
     //       previous steps, we can return std.math.MaxInt(u64) for the fourth
     //       consecutive forward step.
-    pub fn weightOf(self: Grid, node: Node) u4 {
+    pub fn weightOf(self: Grid, node: TravelingNode) u4 {
         return self.lines[node.y][node.x];
     }
 
@@ -183,23 +199,51 @@ const Grid = struct {
         return if (matching_steps == 3) U64_MAX else self.weightOf(next);
     }
 
-    pub fn neighborsOf(self: Grid, node: Node) [4]?struct { Node, Direction } {
-        var ret: [4]?struct { Node, Direction } = .{null} ** 4;
+    pub fn weightConsideringSteps(self: Grid, node: TravelingNode) u64 {
+        return if (node.steps >= 4) U64_MAX else self.weightOf(node);
+    }
+
+    pub fn neighborsOf(self: Grid, node: TravelingNode) [4]?TravelingNode {
+        var ret: [4]?TravelingNode = .{null} ** 4;
         var i: usize = 0;
-        if (node.y > 0) {
-            ret[i] = .{ Node{ .x = node.x, .y = node.y - 1 }, .North };
+        if (node.dir != .South and node.y > 0) {
+            const steps = if (node.dir == .North) node.steps + 1 else 1;
+            ret[i] = .{
+                .x = node.x,
+                .y = node.y - 1,
+                .dir = .North,
+                .steps = steps,
+            };
             i += 1;
         }
-        if (node.x < self.width - 1) {
-            ret[i] = .{ Node{ .x = node.x + 1, .y = node.y }, .East };
+        if (node.dir != .West and node.x < self.width - 1) {
+            const steps = if (node.dir == .East) node.steps + 1 else 1;
+            ret[i] = .{
+                .x = node.x + 1,
+                .y = node.y,
+                .dir = .East,
+                .steps = steps,
+            };
             i += 1;
         }
-        if (node.y < self.height - 1) {
-            ret[i] = .{ Node{ .x = node.x, .y = node.y + 1 }, .South };
+        if (node.dir != .North and node.y < self.height - 1) {
+            const steps = if (node.dir == .South) node.steps + 1 else 1;
+            ret[i] = .{
+                .x = node.x,
+                .y = node.y + 1,
+                .dir = .South,
+                .steps = steps,
+            };
             i += 1;
         }
-        if (node.x > 0) {
-            ret[i] = .{ Node{ .x = node.x - 1, .y = node.y }, .West };
+        if (node.dir != .East and node.x > 0) {
+            const steps = if (node.dir == .West) node.steps + 1 else 1;
+            ret[i] = .{
+                .x = node.x - 1,
+                .y = node.y,
+                .dir = .West,
+                .steps = steps,
+            };
             i += 1;
         }
         return ret;
@@ -212,12 +256,12 @@ const Grid = struct {
 const Frontier = struct {
     // FIXME: This should be a min-heap -- or a linear scan that acts like a
     //        min-heap.
-    items: ArrayList(Node),
+    items: ArrayList(TravelingNode),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) Frontier {
         return Frontier{
-            .items = ArrayList(Node).init(allocator),
+            .items = ArrayList(TravelingNode).init(allocator),
             .allocator = allocator,
         };
     }
@@ -226,26 +270,26 @@ const Frontier = struct {
         self.items.deinit();
     }
 
-    pub fn append(self: *Frontier, node: Node) !void {
-        try self.items.append(node);
+    pub fn append(self: *Frontier, traveling: TravelingNode) !void {
+        try self.items.append(traveling);
     }
 
-    pub fn insertNoClobber(self: *Frontier, node: Node) !void {
+    pub fn insertNoClobber(self: *Frontier, traveling: TravelingNode) !void {
         var should_append = true;
         for (self.items.items) |n| {
-            if (node.eql(n)) {
+            if (traveling.eql(n)) {
                 should_append = false;
                 break;
             }
         }
         if (should_append) {
-            try self.append(node);
+            try self.append(traveling);
         }
     }
 
     /// Remove the Node with the lowest score (as provided by the `score_map`) from
     /// the Frontier and return it.
-    pub fn popMinWithMap(self: *Frontier, score_map: ScoreMap) !?Node {
+    pub fn popMinWithMap(self: *Frontier, score_map: ScoreMap) !?TravelingNode {
         if (self.items.items.len == 0) return null;
         if (self.items.items.len == 1) return self.items.pop();
 
@@ -288,12 +332,19 @@ fn AStar(start: Node, goal: Node, grid: Grid, allocator: std.mem.Allocator) ![]R
     var f_score = ScoreMap.init(allocator);
     defer f_score.deinit();
 
-    try frontier.append(start);
-    try g_score.put(start, 0);
-    try f_score.put(start, strightLineHeuristic(start, goal));
+    // Seed with one step to the East and South of the start.
+    const east = TravelingNode{ .x = start.x + 1, .y = start.y, .dir = .East, .steps = 1 };
+    try frontier.append(east);
+    try g_score.put(east, grid.weightOf(east));
+    try f_score.put(east, strightLineHeuristic(east, goal));
+
+    const south = TravelingNode{ .x = start.x, .y = start.y + 1, .dir = .South, .steps = 1 };
+    try frontier.append(south);
+    try g_score.put(south, grid.weightOf(south));
+    try f_score.put(south, strightLineHeuristic(south, goal));
 
     while (try frontier.popMinWithMap(f_score)) |current| {
-        if (current.eql(goal)) {
+        if (current.atPositionOf(goal)) {
             var ret = ArrayList(ReversePath).init(allocator);
             try reconstructPathArrayLsit(current, came_from, &ret);
             const foo = try ret.toOwnedSlice();
@@ -303,30 +354,27 @@ fn AStar(start: Node, goal: Node, grid: Grid, allocator: std.mem.Allocator) ![]R
         const current_g = g_score.get(current).?;
 
         const neighbors = grid.neighborsOf(current);
-        for (neighbors) |maybe| {
-            if (maybe == null) break;
+        for (neighbors) |neighbor| {
+            if (neighbor == null) break;
 
-            const neighbor = maybe.?[0];
-            const dir = maybe.?[1];
-
-            const neighbor_g = g_score.get(neighbor);
+            const neighbor_g = g_score.get(neighbor.?);
             const new_neighbor_g = sumCappingAtMax(
                 u64,
                 current_g,
-                grid.weightConsideringParents(neighbor, dir, current, came_from),
+                grid.weightConsideringSteps(neighbor.?),
             );
 
             if (neighbor_g == null or new_neighbor_g < neighbor_g.?) {
                 const new_f_score = sumCappingAtMax(
                     u64,
                     new_neighbor_g,
-                    strightLineHeuristic(neighbor, goal),
+                    strightLineHeuristic(neighbor.?, goal),
                 );
-                try came_from.put(neighbor, .{ .node = current, .dir = dir });
-                try g_score.put(neighbor, new_neighbor_g);
-                try f_score.put(neighbor, new_f_score);
+                try came_from.put(neighbor.?, current);
+                try g_score.put(neighbor.?, new_neighbor_g);
+                try f_score.put(neighbor.?, new_f_score);
 
-                try frontier.insertNoClobber(neighbor);
+                try frontier.insertNoClobber(neighbor.?);
             }
         }
     }
@@ -334,24 +382,19 @@ fn AStar(start: Node, goal: Node, grid: Grid, allocator: std.mem.Allocator) ![]R
     return error.UnresolvablePath;
 }
 
-fn strightLineHeuristic(current: Node, goal: Node) u64 {
-    return ((goal.x - current.x) + (goal.y - current.y)) * 4;
+fn strightLineHeuristic(current: TravelingNode, goal: Node) u64 {
+    return ((goal.x - current.x) + (goal.y - current.y)) * 1;
 }
 
 fn reconstructPathArrayLsit(
-    current: Node,
+    current: TravelingNode,
     came_from: ParentOf,
     ret: *ArrayList(ReversePath),
 ) !void {
-    var n: Node = current;
-    var next = came_from.get(n);
-    while (true) {
-        const d = if (next != null) next.?.dir else null;
-        try ret.append(.{ n, d });
-        if (next == null) break;
-
-        n = next.?.node;
-        next = came_from.get(n);
+    var n: ?TravelingNode = current;
+    while (n != null) {
+        try ret.append(.{ .{ .x = n.?.x, .y = n.?.y }, n.?.dir });
+        n = came_from.get(n.?);
     }
 }
 
