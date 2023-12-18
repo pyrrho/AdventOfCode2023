@@ -4,7 +4,7 @@ const AutoHashMap = std.AutoHashMap;
 
 const U64_MAX = std.math.maxInt(u64);
 
-const SAMPLE = true;
+const SAMPLE = false;
 const FILE_PATH = if (SAMPLE) "src/day17_sample_input.txt" else "src/day17_input.txt";
 // The number and span of rows in the input files.
 // FIXME: I'd like to remove this variable, and allow the whole program to be
@@ -64,65 +64,33 @@ pub fn main() !void {
     const start = Node{ .x = 0, .y = 0 };
     const goal = Node{ .x = grid.width - 1, .y = grid.height - 1 };
 
-    const path = try AStar(start, goal, grid, allocator);
+    const ret = try AStar(start, goal, grid, allocator);
+    const path = ret.path;
+    const heat_loss = ret.heat_loss;
+
     defer allocator.free(path);
 
     // Print that path
     // -------------------------------------------------------------------------
-    var path_map = AutoHashMap(Node, ?Direction).init(allocator);
-    var heat_loss: u64 = 0;
-    defer path_map.deinit();
-    for (path) |n| {
-        try path_map.put(n[0], n[1]);
-        heat_loss += grid.lines[n[0].y][n[0].x];
-    }
+    if (SAMPLE) try grid.debugPrint(path, allocator);
 
-    for (grid.lines, 0..) |row, y| {
-        for (row, 0..) |_, x| {
-            std.debug.print("{}", .{grid.lines[y][x]});
-        }
-        std.debug.print("    ", .{});
-        for (row, 0..) |_, x| {
-            if (path_map.get(Node{ .x = x, .y = y })) |dir| {
-                const c: u8 = if (dir == null) '#' else switch (dir.?) {
-                    .North => '^',
-                    .South => 'v',
-                    .West => '<',
-                    .East => '>',
-                };
-
-                std.debug.print("{c}", .{c});
-            } else {
-                std.debug.print("{}", .{grid.lines[y][x]});
-            }
-        }
-        std.debug.print("\n", .{});
-    }
-
-    std.debug.print("Heat loss: {}\n", .{heat_loss});
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("Heat loss: {}\n", .{heat_loss});
 }
 
 // Types
 // =============================================================================
-
-// Type Aliases
-// ------------
-
-const DirectionalNode = struct { node: Node, dir: Direction };
-const ReversePath = struct { Node, Direction };
-
-const ParentOf = AutoHashMap(TravelingNode, TravelingNode);
-
-const ScoreMap = AutoHashMap(TravelingNode, u64);
-
-// Structs
-// -------
 
 const Direction = enum(usize) {
     North,
     South,
     West,
     East,
+};
+
+const Directionality = enum {
+    NorthSouth,
+    EastWest,
 };
 
 const Node = struct {
@@ -134,19 +102,26 @@ const Node = struct {
     }
 };
 
-const TravelingNode = struct {
-    x: usize,
-    y: usize,
-    dir: Direction,
-    steps: u8,
+const NodeWithDirectionality = struct {
+    node: Node,
+    dir: Directionality,
 
-    pub fn eql(self: TravelingNode, other: TravelingNode) bool {
-        return self.x == other.x and self.y == other.y and self.dir == other.dir and self.steps == other.steps;
-    }
-    pub fn atPositionOf(self: TravelingNode, other: Node) bool {
-        return self.x == other.x and self.y == other.y;
+    pub fn eql(self: NodeWithDirectionality, other: NodeWithDirectionality) bool {
+        return self.node.eql(other.node) and self.dir == other.dir;
     }
 };
+
+const NodeWithDirection = struct {
+    node: Node,
+    dir: Direction,
+
+    pub fn eql(self: NodeWithDirection, other: NodeWithDirection) bool {
+        return self.node.eql(other.node) and self.dir == other.dir;
+    }
+};
+
+const ParentOf = AutoHashMap(NodeWithDirectionality, NodeWithDirectionality);
+const ScoreMap = AutoHashMap(NodeWithDirectionality, u64);
 
 const Grid = struct {
     lines: [][]u4,
@@ -170,83 +145,109 @@ const Grid = struct {
         self.allocator.free(self.lines);
     }
 
-    // TODO: This might be where we limit the forward steps. If we can track
-    //       previous steps, we can return std.math.MaxInt(u64) for the fourth
-    //       consecutive forward step.
-    pub fn weightOf(self: Grid, node: TravelingNode) u4 {
+    pub fn weightOf(self: Grid, node: Node) u4 {
         return self.lines[node.y][node.x];
     }
 
-    pub fn weightConsideringParents(
-        self: Grid,
-        next: Node,
-        dir: Direction,
-        current: Node,
-        parents: ParentOf,
-    ) u64 {
-        var last = parents.get(current);
-        var matching_steps: usize = 0;
-        while (true) {
-            if (last == null) break;
-            if (last.?.dir != dir) break;
+    pub fn weightBetween(self: Grid, current: Node, next: Node) u64 {
+        std.debug.assert(current.x == next.x or current.y == next.y);
 
-            matching_steps += 1;
-            if (matching_steps == 3) break;
-
-            last = parents.get(last.?.node);
+        var ret: u64 = 0;
+        if (current.y == next.y) {
+            const y = current.y;
+            var x = current.x;
+            while (x != next.x) {
+                x = if (current.x < next.x) x + 1 else x - 1;
+                ret += self.lines[y][x];
+            }
         }
-
-        return if (matching_steps == 3) U64_MAX else self.weightOf(next);
-    }
-
-    pub fn weightConsideringSteps(self: Grid, node: TravelingNode) u64 {
-        return if (node.steps >= 4) U64_MAX else self.weightOf(node);
-    }
-
-    pub fn neighborsOf(self: Grid, node: TravelingNode) [4]?TravelingNode {
-        var ret: [4]?TravelingNode = .{null} ** 4;
-        var i: usize = 0;
-        if (node.dir != .South and node.y > 0) {
-            const steps = if (node.dir == .North) node.steps + 1 else 1;
-            ret[i] = .{
-                .x = node.x,
-                .y = node.y - 1,
-                .dir = .North,
-                .steps = steps,
-            };
-            i += 1;
-        }
-        if (node.dir != .West and node.x < self.width - 1) {
-            const steps = if (node.dir == .East) node.steps + 1 else 1;
-            ret[i] = .{
-                .x = node.x + 1,
-                .y = node.y,
-                .dir = .East,
-                .steps = steps,
-            };
-            i += 1;
-        }
-        if (node.dir != .North and node.y < self.height - 1) {
-            const steps = if (node.dir == .South) node.steps + 1 else 1;
-            ret[i] = .{
-                .x = node.x,
-                .y = node.y + 1,
-                .dir = .South,
-                .steps = steps,
-            };
-            i += 1;
-        }
-        if (node.dir != .East and node.x > 0) {
-            const steps = if (node.dir == .West) node.steps + 1 else 1;
-            ret[i] = .{
-                .x = node.x - 1,
-                .y = node.y,
-                .dir = .West,
-                .steps = steps,
-            };
-            i += 1;
+        if (current.x == next.x) {
+            const x = current.x;
+            var y = current.y;
+            while (y != next.y) {
+                y = if (current.y < next.y) y + 1 else y - 1;
+                ret += self.lines[y][x];
+            }
         }
         return ret;
+    }
+
+    pub fn neighborsOf(self: Grid, nwd: NodeWithDirectionality) [6]?NodeWithDirectionality {
+        return switch (nwd.dir) {
+            .NorthSouth => self.eastWestNeighborsOf(nwd.node),
+            .EastWest => self.northSouthNeighborsOf(nwd.node),
+        };
+    }
+
+    pub fn northSouthNeighborsOf(self: Grid, node: Node) [6]?NodeWithDirectionality {
+        var ret: [6]?NodeWithDirectionality = .{null} ** 6;
+        var i: usize = 0;
+
+        for (1..4) |j| {
+            if (node.y < self.height - j) {
+                ret[i] = .{ .node = .{ .x = node.x, .y = node.y + j }, .dir = .NorthSouth };
+                i += 1;
+            } else break;
+        }
+        for (1..4) |j| {
+            if (node.y >= j) {
+                ret[i] = .{ .node = .{ .x = node.x, .y = node.y - j }, .dir = .NorthSouth };
+                i += 1;
+            } else break;
+        }
+
+        return ret;
+    }
+
+    pub fn eastWestNeighborsOf(self: Grid, node: Node) [6]?NodeWithDirectionality {
+        var ret: [6]?NodeWithDirectionality = .{null} ** 6;
+        var i: usize = 0;
+
+        for (1..4) |j| {
+            if (node.x < self.width - j) {
+                ret[i] = .{ .node = .{ .x = node.x + j, .y = node.y }, .dir = .EastWest };
+                i += 1;
+            } else break;
+        }
+        for (1..4) |j| {
+            if (node.x >= j) {
+                ret[i] = .{ .node = .{ .x = node.x - j, .y = node.y }, .dir = .EastWest };
+                i += 1;
+            } else break;
+        }
+
+        return ret;
+    }
+
+    pub fn debugPrint(self: Grid, path: []NodeWithDirection, allocator: std.mem.Allocator) !void {
+        var path_map = AutoHashMap(Node, Direction).init(allocator);
+        defer path_map.deinit();
+
+        for (path) |n| {
+            try path_map.put(n.node, n.dir);
+        }
+
+        for (self.lines, 0..) |row, y| {
+            for (row, 0..) |_, x| {
+                std.debug.print("{}", .{self.lines[y][x]});
+            }
+            std.debug.print("    ", .{});
+            for (row, 0..) |_, x| {
+                if (path_map.get(Node{ .x = x, .y = y })) |dir| {
+                    const c: u8 = switch (dir) {
+                        .North => '^',
+                        .South => 'v',
+                        .West => '<',
+                        .East => '>',
+                    };
+
+                    std.debug.print("{c}", .{c});
+                } else {
+                    std.debug.print("{}", .{self.lines[y][x]});
+                }
+            }
+            std.debug.print("\n", .{});
+        }
     }
 };
 
@@ -256,12 +257,12 @@ const Grid = struct {
 const Frontier = struct {
     // FIXME: This should be a min-heap -- or a linear scan that acts like a
     //        min-heap.
-    items: ArrayList(TravelingNode),
+    items: ArrayList(NodeWithDirectionality),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) Frontier {
         return Frontier{
-            .items = ArrayList(TravelingNode).init(allocator),
+            .items = ArrayList(NodeWithDirectionality).init(allocator),
             .allocator = allocator,
         };
     }
@@ -270,26 +271,26 @@ const Frontier = struct {
         self.items.deinit();
     }
 
-    pub fn append(self: *Frontier, traveling: TravelingNode) !void {
-        try self.items.append(traveling);
+    pub fn append(self: *Frontier, nwd: NodeWithDirectionality) !void {
+        try self.items.append(nwd);
     }
 
-    pub fn insertNoClobber(self: *Frontier, traveling: TravelingNode) !void {
+    pub fn insertNoClobber(self: *Frontier, nwd: NodeWithDirectionality) !void {
         var should_append = true;
         for (self.items.items) |n| {
-            if (traveling.eql(n)) {
+            if (nwd.eql(n)) {
                 should_append = false;
                 break;
             }
         }
         if (should_append) {
-            try self.append(traveling);
+            try self.append(nwd);
         }
     }
 
     /// Remove the Node with the lowest score (as provided by the `score_map`) from
     /// the Frontier and return it.
-    pub fn popMinWithMap(self: *Frontier, score_map: ScoreMap) !?TravelingNode {
+    pub fn popMinWithMap(self: *Frontier, score_map: ScoreMap) ?NodeWithDirectionality {
         if (self.items.items.len == 0) return null;
         if (self.items.items.len == 1) return self.items.pop();
 
@@ -310,92 +311,152 @@ const Frontier = struct {
 // A* Search Algoritm
 // =============================================================================
 
-fn AStar(start: Node, goal: Node, grid: Grid, allocator: std.mem.Allocator) ![]ReversePath {
+fn AStar(
+    start: Node,
+    goal: Node,
+    grid: Grid,
+    allocator: std.mem.Allocator,
+) !struct { path: []NodeWithDirection, heat_loss: u64 } {
     // Nodes to be evaluated.
     var frontier = Frontier.init(allocator);
     defer frontier.deinit();
 
     // Map from a Node N to the Node immediately preceding it on the cheapest
     // path from `start` to N that is currently known.
-    var came_from = ParentOf.init(allocator);
-    defer came_from.deinit();
+    var parents = ParentOf.init(allocator);
+    defer parents.deinit();
 
     // Map from a Node N to the cost of the cheapest path from `start` to N
     // that is currently known.
     // If no value is found for N, `std.math.MaxInt(u64)` should be assumed.
-    var g_score = ScoreMap.init(allocator);
-    defer g_score.deinit();
+    var g_score_map = ScoreMap.init(allocator);
+    defer g_score_map.deinit();
 
     // Map from a Node N to our guess of the cheapest path from `start`, through
     // N to `goal`. Specifically, `f_score[N] = g_score[N] + heuristic(N)`.
     // If no value is found for N, `std.math.MaxInt(u64)` should be assumed.
-    var f_score = ScoreMap.init(allocator);
-    defer f_score.deinit();
+    var f_score_map = ScoreMap.init(allocator);
+    defer f_score_map.deinit();
 
-    // Seed with one step to the East and South of the start.
-    const east = TravelingNode{ .x = start.x + 1, .y = start.y, .dir = .East, .steps = 1 };
-    try frontier.append(east);
-    try g_score.put(east, grid.weightOf(east));
-    try f_score.put(east, strightLineHeuristic(east, goal));
+    const ns = NodeWithDirectionality{ .node = start, .dir = .NorthSouth };
+    try frontier.append(ns);
+    try g_score_map.put(ns, 0);
+    try f_score_map.put(ns, strightLineHeuristic(start, goal));
 
-    const south = TravelingNode{ .x = start.x, .y = start.y + 1, .dir = .South, .steps = 1 };
-    try frontier.append(south);
-    try g_score.put(south, grid.weightOf(south));
-    try f_score.put(south, strightLineHeuristic(south, goal));
+    const ew = NodeWithDirectionality{ .node = start, .dir = .EastWest };
+    try frontier.append(ew);
+    try g_score_map.put(ew, 0);
+    try f_score_map.put(ew, strightLineHeuristic(start, goal));
 
-    while (try frontier.popMinWithMap(f_score)) |current| {
-        if (current.atPositionOf(goal)) {
-            var ret = ArrayList(ReversePath).init(allocator);
-            try reconstructPathArrayLsit(current, came_from, &ret);
-            const foo = try ret.toOwnedSlice();
-            return foo;
+    // This isn't a typical A* implementation, because it needs to account for
+    // the dynamic nature of previous steps affecting the outcome. However, once
+    // a route from `start` to `goal` is found, we can stop considering any path
+    // with a g_score greater than the g_score of that path.
+    var maximum_g_score: u64 = U64_MAX;
+    var shortest_path_termination: ?NodeWithDirectionality = null;
+
+    // Process the frontier.
+    while (frontier.popMinWithMap(f_score_map)) |current| {
+        const current_g = g_score_map.get(current) orelse @panic("No g_score found for current node");
+
+        if (current_g >= maximum_g_score) continue;
+
+        if (goal.eql(current.node)) {
+            maximum_g_score = @min(current_g, maximum_g_score);
+            shortest_path_termination = current;
+
+            if (SAMPLE) {
+                const path = try constructPath(current, parents, allocator);
+                defer allocator.free(path);
+
+                try grid.debugPrint(path, allocator);
+                std.debug.print("heat loss: {}\n\n", .{maximum_g_score});
+            }
+            continue;
         }
 
-        const current_g = g_score.get(current).?;
-
         const neighbors = grid.neighborsOf(current);
-        for (neighbors) |neighbor| {
-            if (neighbor == null) break;
+        for (neighbors) |_neighbor| {
+            if (_neighbor == null) break;
+            const neighbor = _neighbor.?;
 
-            const neighbor_g = g_score.get(neighbor.?);
-            const new_neighbor_g = sumCappingAtMax(
-                u64,
-                current_g,
-                grid.weightConsideringSteps(neighbor.?),
-            );
+            const neighbor_g = g_score_map.get(neighbor);
+            const new_neighbor_g = current_g + grid.weightBetween(current.node, neighbor.node);
 
             if (neighbor_g == null or new_neighbor_g < neighbor_g.?) {
-                const new_f_score = sumCappingAtMax(
-                    u64,
-                    new_neighbor_g,
-                    strightLineHeuristic(neighbor.?, goal),
-                );
-                try came_from.put(neighbor.?, current);
-                try g_score.put(neighbor.?, new_neighbor_g);
-                try f_score.put(neighbor.?, new_f_score);
+                const new_f_score = new_neighbor_g + strightLineHeuristic(neighbor.node, goal);
+                try parents.put(neighbor, current);
+                try g_score_map.put(neighbor, new_neighbor_g);
+                try f_score_map.put(neighbor, new_f_score);
 
-                try frontier.insertNoClobber(neighbor.?);
+                try frontier.insertNoClobber(neighbor);
             }
         }
     }
 
-    return error.UnresolvablePath;
+    if (shortest_path_termination == null) return error.UnresolvablePath;
+
+    // Reconstruct the path.
+    return .{
+        .path = try constructPath(shortest_path_termination.?, parents, allocator),
+        .heat_loss = maximum_g_score,
+    };
 }
 
-fn strightLineHeuristic(current: TravelingNode, goal: Node) u64 {
-    return ((goal.x - current.x) + (goal.y - current.y)) * 1;
-}
+fn constructPath(
+    start: NodeWithDirectionality,
+    parents: ParentOf,
+    allocator: std.mem.Allocator,
+) ![]NodeWithDirection {
+    var ret = ArrayList(NodeWithDirection).init(allocator);
+    var current = start;
+    var _parent = parents.get(current);
 
-fn reconstructPathArrayLsit(
-    current: TravelingNode,
-    came_from: ParentOf,
-    ret: *ArrayList(ReversePath),
-) !void {
-    var n: ?TravelingNode = current;
-    while (n != null) {
-        try ret.append(.{ .{ .x = n.?.x, .y = n.?.y }, n.?.dir });
-        n = came_from.get(n.?);
+    while (_parent != null) {
+        const parent = _parent.?;
+        switch (current.dir) {
+            .NorthSouth => {
+                if (parent.node.y < current.node.y) {
+                    // traveling south
+                    for (0..current.node.y - parent.node.y) |i| {
+                        try ret.append(.{ .node = .{ .y = current.node.y - i, .x = current.node.x }, .dir = .South });
+                    }
+                }
+                if (parent.node.y > current.node.y) {
+                    // traveling north
+                    for (0..parent.node.y - current.node.y) |i| {
+                        try ret.append(.{ .node = .{ .y = current.node.y + i, .x = current.node.x }, .dir = .North });
+                    }
+                }
+            },
+            .EastWest => {
+                if (parent.node.x < current.node.x) {
+                    // traveling east
+                    for (0..current.node.x - parent.node.x) |i| {
+                        try ret.append(.{ .node = .{ .y = current.node.y, .x = current.node.x - i }, .dir = .East });
+                    }
+                }
+                if (parent.node.x > current.node.x) {
+                    // traveling west
+                    for (0..parent.node.x - current.node.x) |i| {
+                        try ret.append(.{ .node = .{ .y = current.node.y, .x = current.node.x + i }, .dir = .West });
+                    }
+                }
+            },
+        }
+
+        current = parent;
+        _parent = parents.get(current);
     }
+
+    return ret.toOwnedSlice();
+}
+
+fn strightLineHeuristic(current: Node, goal: Node) u64 {
+    const d_x = goal.x - current.x;
+    const d_y = goal.y - current.y;
+    const d = @sqrt(@as(f32, @floatFromInt(d_x * d_x + d_y * d_y)));
+    return @as(u64, @intFromFloat(d));
 }
 
 fn sumCappingAtMax(comptime T: type, a: T, b: T) T {
